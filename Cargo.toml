@@ -1,6 +1,6 @@
 [package]
 name = "i-wzu-auth"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["sorubedo"]
 repository = "https://github.com/sorubedo/i-wzu-auth"

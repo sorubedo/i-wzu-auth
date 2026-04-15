@@ -132,13 +132,10 @@ impl SrunClient {
     pub fn logout(&self) -> Result<AuthResponse, String> {
         let user_info = self.check_info("0.0.0.0")?;
         
-        // 关键：注销时的 IP 必须极其准确
         let ip = user_info["online_ip"].as_str()
             .or(user_info["client_ip"].as_str())
             .unwrap_or("0.0.0.0");
 
-        // 关键：部分校园网环境注销需要完整的 username (包括域名)
-        // 根据参考代码，账号由 user_name 和 domain 拼接而成
         let username = if let (Some(user), Some(domain)) = (user_info["user_name"].as_str(), user_info["domain"].as_str()) {
             if !domain.is_empty() {
                 format!("{}@{}", user, domain)
@@ -149,13 +146,36 @@ impl SrunClient {
             self.username.clone()
         };
 
-        let url = format!("{}/cgi-bin/srun_portal", self.base_url);
-        let resp = ureq::get(&url)
+        // 步骤 1: 标准 Session 注销 (Logout Normal)
+        let url_logout = format!("{}/cgi-bin/srun_portal", self.base_url);
+        let _ = ureq::get(&url_logout)
             .query("action", "logout")
             .query("username", &username)
             .query("ip", ip)
             .query("ac_id", &self.ac_id)
-            .query("double_stack", "0") // 补全默认参数
+            .query("double_stack", "0")
+            .query("callback", "jQuery123")
+            .call();
+
+        // 步骤 2: 解除 MAC 无感绑定 (Logout DM / Unbind)
+        // 这一步是防止校园网注销后立即自动登录的关键
+        let time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs().to_string())
+            .unwrap_or_else(|_| "0".to_string());
+        
+        let unbind = "1";
+        // 签名逻辑参考 portal.js: sha1(time + username + ip + unbind + time)
+        let sign_data = format!("{}{}{}{}{}", time, username, ip, unbind, time);
+        let sign = crypto::sha1(&sign_data);
+
+        let url_dm = format!("{}/cgi-bin/rad_user_dm", self.base_url);
+        let resp = ureq::get(&url_dm)
+            .query("username", &username)
+            .query("ip", ip)
+            .query("unbind", unbind)
+            .query("time", &time)
+            .query("sign", &sign)
             .query("callback", "jQuery123")
             .call()
             .map_err(|e| e.to_string())?
