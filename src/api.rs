@@ -136,42 +136,32 @@ impl SrunClient {
             .or(user_info["client_ip"].as_str())
             .unwrap_or("0.0.0.0");
 
-        let username = if let (Some(user), Some(domain)) = (user_info["user_name"].as_str(), user_info["domain"].as_str()) {
-            if !domain.is_empty() {
-                format!("{}@{}", user, domain)
-            } else {
-                user.to_string()
-            }
+        // 获取不带域名的用户名和单独的域名
+        let user_name_only = user_info["user_name"].as_str().unwrap_or(&self.username);
+        let domain = user_info["domain"].as_str().unwrap_or("");
+        
+        // 构造带域名的完整用户名 (用于 srun_portal)
+        let username_with_domain = if !domain.is_empty() {
+            format!("{}@{}", user_name_only, domain)
         } else {
-            self.username.clone()
+            user_name_only.to_string()
         };
 
-        // 步骤 1: 标准 Session 注销 (Logout Normal)
-        let url_logout = format!("{}/cgi-bin/srun_portal", self.base_url);
-        let _ = ureq::get(&url_logout)
-            .query("action", "logout")
-            .query("username", &username)
-            .query("ip", ip)
-            .query("ac_id", &self.ac_id)
-            .query("double_stack", "0")
-            .query("callback", "jQuery123")
-            .call();
-
-        // 步骤 2: 解除 MAC 无感绑定 (Logout DM / Unbind)
-        // 这一步是防止校园网注销后立即自动登录的关键
+        // 步骤 1: 解除 MAC 无感绑定 (Logout DM / Unbind)
+        // 参考 portal.js 的 _logoutDm 实现：使用不带域名的用户名，且在 MacAuth 模式下仅需此步
         let time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs().to_string())
             .unwrap_or_else(|_| "0".to_string());
         
         let unbind = "1";
-        // 签名逻辑参考 portal.js: sha1(time + username + ip + unbind + time)
-        let sign_data = format!("{}{}{}{}{}", time, username, ip, unbind, time);
+        // 签名逻辑使用不带域名的用户名: sha1(time + user_name_only + ip + unbind + time)
+        let sign_data = format!("{}{}{}{}{}", time, user_name_only, ip, unbind, time);
         let sign = crypto::sha1(&sign_data);
 
         let url_dm = format!("{}/cgi-bin/rad_user_dm", self.base_url);
-        let resp = ureq::get(&url_dm)
-            .query("username", &username)
+        let resp_dm_str = ureq::get(&url_dm)
+            .query("username", user_name_only)
             .query("ip", ip)
             .query("unbind", unbind)
             .query("time", &time)
@@ -182,7 +172,18 @@ impl SrunClient {
             .into_string()
             .map_err(|e| e.to_string())?;
 
-        let json = Self::extract_jsonp(&resp)?;
+        // 步骤 2: 标准 Session 注销 (Logout Normal) - 作为补充调用
+        let url_logout = format!("{}/cgi-bin/srun_portal", self.base_url);
+        let _ = ureq::get(&url_logout)
+            .query("action", "logout")
+            .query("username", &username_with_domain)
+            .query("ip", ip)
+            .query("ac_id", &self.ac_id)
+            .query("double_stack", "0")
+            .query("callback", "jQuery123")
+            .call();
+
+        let json = Self::extract_jsonp(&resp_dm_str)?;
         serde_json::from_value(json).map_err(|e| e.to_string())
     }
 
