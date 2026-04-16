@@ -55,6 +55,7 @@ cargo build --release
 | `--password` | `-p` | 校园网密码 | 无 / `SRUN_PASS` |
 | `--ac-id` | `-a` | 网关节点 ID | `2` (温大通常为 2) |
 | `--force` | `-f` | 强制执行登录 (跳过在线检测) | `false` |
+| `--dual-stack` | `-d` | 启用双栈认证 (IPv4/IPv6 Dual Stack) | `false` |
 
 ### 子命令 (Subcommands)
 

@@ -22,15 +22,17 @@ pub struct SrunClient {
     pub username: String,
     pub password: String,
     pub ac_id: String,
+    pub double_stack: bool,
 }
 
 impl SrunClient {
-    pub fn new(base_url: &str, username: &str, password: &str, ac_id: &str) -> Self {
+    pub fn new(base_url: &str, username: &str, password: &str, ac_id: &str, double_stack: bool) -> Self {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             username: username.to_string(),
             password: password.to_string(),
             ac_id: ac_id.to_string(),
+            double_stack,
         }
     }
 
@@ -70,7 +72,7 @@ impl SrunClient {
     }
 
     pub fn login(&self) -> Result<AuthResponse, String> {
-        let user_info = self.check_info("0.0.0.0")?;
+        let user_info = self.check_info("")?;
         let ip = user_info["online_ip"].as_str()
             .or(user_info["client_ip"].as_str())
             .unwrap_or("0.0.0.0").to_string();
@@ -104,6 +106,20 @@ impl SrunClient {
         );
         let chksum = crypto::sha1(&chksum_str);
 
+        let os_name = if cfg!(target_os = "windows") {
+            "Windows 10"
+        } else if cfg!(target_os = "macos") {
+            "macOS"
+        } else if cfg!(target_os = "android") {
+            "Android"
+        } else if cfg!(target_os = "ios") {
+            "iOS"
+        } else {
+            "Linux"
+        };
+
+        let double_stack_val = if self.double_stack { "1" } else { "0" };
+
         let url = format!("{}/cgi-bin/srun_portal", self.base_url);
         let resp = ureq::get(&url)
             .query("action", "login")
@@ -115,9 +131,9 @@ impl SrunClient {
             .query("chksum", &chksum)
             .query("n", n)
             .query("type", auth_type)
-            .query("os", "Linux")
-            .query("name", "Linux")
-            .query("double_stack", "0")
+            .query("os", os_name)
+            .query("name", os_name)
+            .query("double_stack", double_stack_val)
             .query("nas_ip", nas_ip)
             .query("callback", "jQuery123")
             .call()
@@ -130,7 +146,7 @@ impl SrunClient {
     }
 
     pub fn logout(&self) -> Result<AuthResponse, String> {
-        let user_info = self.check_info("0.0.0.0")?;
+        let user_info = self.check_info("")?;
         
         let ip = user_info["online_ip"].as_str()
             .or(user_info["client_ip"].as_str())
@@ -189,8 +205,13 @@ impl SrunClient {
 
     pub fn check_info(&self, ip: &str) -> Result<Value, String> {
         let url = format!("{}/cgi-bin/rad_user_info", self.base_url);
-        let resp = ureq::get(&url)
-            .query("ip", ip)
+        let mut request = ureq::get(&url);
+        
+        if !ip.is_empty() {
+            request = request.query("ip", ip);
+        }
+
+        let resp = request
             .query("callback", "jQuery123")
             .call()
             .map_err(|e| e.to_string())?
