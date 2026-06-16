@@ -1,5 +1,6 @@
 mod crypto;
 mod api;
+mod config;
 
 use clap::{Parser, Subcommand};
 use api::SrunClient;
@@ -22,6 +23,10 @@ struct Args {
     #[arg(short = 'U', long, env = "SRUN_URL", global = true, default_value = "http://192.168.16.66")]
     url: String,
 
+    /// 联网检测 URL (HTTP 204 即为已联网)，国内用户可设为 connect.rom.miui.com/generate_204
+    #[arg(long, env = "SRUN_CHECK_URL", global = true, default_value = "http://connect.rom.miui.com/generate_204")]
+    check_url: String,
+
     /// 校园网账号 (登录时必填)
     #[arg(short = 'u', long, env = "SRUN_USER", global = true)]
     username: Option<String>,
@@ -30,11 +35,19 @@ struct Args {
     #[arg(short = 'p', long, env = "SRUN_PASS", global = true)]
     password: Option<String>,
 
+    /// 从标准输入读取密码 (替代 -p，避免密码出现在命令行历史中)
+    #[arg(short = 'P', long, global = true, conflicts_with = "password")]
+    password_stdin: bool,
+
+    /// 登录成功后以明文保存配置到本地 (~/.config/i-wzu-auth/config.json, 权限 0600)
+    #[arg(short = 's', long, global = true)]
+    save: bool,
+
     /// 网关节点 ID (AC ID)，温州大学通常为 2
     #[arg(short = 'a', long, default_value = "2", global = true)]
     ac_id: String,
 
-    /// 强制执行登录 (即使当前已在线)
+    /// 强制执行登录，跳过登录前后的联网检测
     #[arg(short, long, global = true)]
     force: bool,
 
@@ -53,6 +66,35 @@ enum Commands {
     Status,
 }
 
+/// 从标准输入读取密码
+///
+/// 支持两种模式：
+/// - TTY 模式：使用 rpassword 实现无回显交互输入
+/// - 管道模式：从重定向/管道读取一行
+fn read_password_from_stdin() -> String {
+    use std::io::IsTerminal;
+    if std::io::stdin().is_terminal() {
+        // TTY 模式：无回显输入
+        rpassword::prompt_password("Password: ").unwrap_or_else(|e| {
+            eprintln!("{} 读取密码失败: {}", "❌".red(), e);
+            std::process::exit(1);
+        })
+    } else {
+        // 管道/重定向模式
+        let mut buf = String::new();
+        io::stdin().read_line(&mut buf).unwrap_or_else(|e| {
+            eprintln!("{} 从标准输入读取密码失败: {}", "❌".red(), e);
+            std::process::exit(1);
+        });
+        let trimmed = buf.trim().to_string();
+        if trimmed.is_empty() {
+            eprintln!("{} 标准输入中未提供密码", "❌".red());
+            std::process::exit(1);
+        }
+        trimmed
+    }
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -61,6 +103,7 @@ fn main() {
     println!("{}", "==========================================\n".cyan());
 
     let url = args.url;
+    let check_url = args.check_url;
     let ac_id = args.ac_id;
     let dual_stack = args.dual_stack;
 
@@ -70,23 +113,72 @@ fn main() {
             let username = match args.username {
                 Some(u) => u,
                 None => {
-                    eprintln!("{} {} {}\n", "❌".red(), "参数错误:".red().bold(), "登录需要指定账号。".white());
-                    eprintln!("{} 请使用 {} 参数或设置 {} 环境变量。\n", "  ".dimmed(), "-u".cyan(), "SRUN_USER".cyan());
-                    std::process::exit(1);
+                    // 尝试从配置文件读取用户名
+                    if config::config_exists() {
+                        match config::load_config() {
+                            Ok((saved_user, _)) => saved_user,
+                            Err(e) => {
+                                eprintln!(
+                                    "{} {} {}\n",
+                                    "❌".red(),
+                                    "读取配置文件失败:".red().bold(),
+                                    e.white()
+                                );
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        eprintln!("{} {} {}\n", "❌".red(), "参数错误:".red().bold(), "登录需要指定账号。".white());
+                        eprintln!(
+                            "{} 请使用 {} 参数或设置 {} 环境变量。\n",
+                            "  ".dimmed(),
+                            "-u".cyan(),
+                            "SRUN_USER".cyan()
+                        );
+                        std::process::exit(1);
+                    }
                 }
             };
-            let password = match args.password {
-                Some(p) => p,
-                None => {
-                    eprintln!("{} {} {}\n", "❌".red(), "参数错误:".red().bold(), "登录需要指定密码。".white());
-                    eprintln!("{} 请使用 {} 参数或设置 {} 环境变量。\n", "  ".dimmed(), "-p".cyan(), "SRUN_PASS".cyan());
-                    std::process::exit(1);
+            let password = if args.password_stdin {
+                // 如果同时通过环境变量 SRUN_PASS 提供了密码，发出警告
+                if args.password.is_some() {
+                    eprintln!(
+                        "{} 同时指定了 --password-stdin 和 -p/SRUN_PASS，将使用 --password-stdin。",
+                        "⚠️".yellow()
+                    );
                 }
+                read_password_from_stdin()
+            } else if let Some(p) = args.password {
+                p
+            } else if config::config_exists() {
+                match config::load_config() {
+                    Ok((_, saved_pass)) => saved_pass,
+                    Err(e) => {
+                        eprintln!(
+                            "{} {} {}\n",
+                            "❌".red(),
+                            "读取配置文件失败:".red().bold(),
+                            e.white()
+                        );
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                eprintln!("{} {} {}\n", "❌".red(), "参数错误:".red().bold(), "登录需要指定密码。".white());
+                eprintln!(
+                    "{} 请使用 {} 参数、{} 参数、{} 环境变量或 {} 保存配置。\n",
+                    "  ".dimmed(),
+                    "-p".cyan(),
+                    "--password-stdin".cyan(),
+                    "SRUN_PASS".cyan(),
+                    "--save".cyan()
+                );
+                std::process::exit(1);
             };
             
             if !args.force {
                 print!("{} {} ", "🔍".blue(), "正在检测网络连通性...".white());
-                if SrunClient::check_online() {
+                if SrunClient::check_online(&check_url) {
                     println!("{}", "已联网 (Online)".green().bold());
                     println!("{}\n", "✨ 您已处于在线状态，无需重复登录。".bright_green());
                     return;
@@ -105,6 +197,22 @@ fn main() {
                 Ok(resp) => {
                     if resp.res == "ok" {
                         println!("{} {}", "✅".green(), "登录成功！服务器响应: OK".green().bold());
+
+                        // 保存配置到本地文件
+                        if args.save {
+                            match config::save_config(&username, &password) {
+                                Ok(()) => println!(
+                                    "{} 配置已保存到 {}",
+                                    "🔐".green(),
+                                    config::config_path().display().to_string().dimmed()
+                                ),
+                                Err(e) => eprintln!(
+                                    "{} 保存配置失败: {}",
+                                    "⚠️".yellow(),
+                                    e
+                                ),
+                            }
+                        }
                     } else {
                         let error_msg = resp.error_msg.clone().unwrap_or_else(|| "未知错误".to_string());
                         let error_code = resp.error.clone().unwrap_or_else(|| "N/A".to_string());
@@ -131,19 +239,24 @@ fn main() {
                 }
             }
 
-            print!("{} {} ", "🔬".blue(), "正在进行二次联网验证".white());
-            for i in (1..=3).rev() {
-                print!("{} ", i.to_string().cyan());
-                io::stdout().flush().unwrap();
-                std::thread::sleep(std::time::Duration::from_secs(1));
-            }
+            if !args.force {
+                print!("{} {} ", "🔬".blue(), "正在进行二次联网验证".white());
+                for i in (1..=3).rev() {
+                    print!("{} ", i.to_string().cyan());
+                    io::stdout().flush().unwrap();
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
 
-            if SrunClient::check_online() {
-                println!("{}", "验证通过 (Success)".green().bold());
-                println!("\n{}\n", "🎉 认证流程全部完成，祝您用网愉快！".bright_green().bold());
+                if SrunClient::check_online(&check_url) {
+                    println!("{}", "验证通过 (Success)".green().bold());
+                    println!("\n{}\n", "🎉 认证流程全部完成，祝您用网愉快！".bright_green().bold());
+                } else {
+                    println!("{}", "验证失败 (Failed)".red().bold());
+                    std::process::exit(1);
+                }
             } else {
-                println!("{}", "验证失败 (Failed)".red().bold());
-                std::process::exit(1);
+                println!("{} 已跳过二次联网验证", "⏩".yellow());
+                println!("\n{}\n", "🎉 认证流程全部完成，祝您用网愉快！".bright_green().bold());
             }
         }
         Commands::Logout => {
@@ -167,7 +280,7 @@ fn main() {
                                     std::thread::sleep(std::time::Duration::from_secs(1));
                                 }
 
-                                if SrunClient::check_online() {
+                                if SrunClient::check_online(&check_url) {
                                     println!("{}", "仍然在线 (Still Online)".yellow());
                                     println!("{} {}\n", "💡".yellow(), "网关放行可能存在延迟，请等待物理连接自动断开。".dimmed());
                                 } else {

@@ -47,8 +47,8 @@ impl SrunClient {
         }
     }
 
-    pub fn check_online() -> bool {
-        match ureq::get("http://www.google.cn/generate_204")
+    pub fn check_online(check_url: &str) -> bool {
+        match ureq::get(check_url)
             .timeout(std::time::Duration::from_secs(3))
             .call() {
             Ok(resp) => resp.status() == 204,
