@@ -31,17 +31,13 @@ cargo build --release
 
 ### 2. 常用操作
 ```bash
-# 登录认证 (会自动检测网络，若已在线则直接退出)
-# 安全方式: 从 stdin 管道读取密码
-echo "YourPassword" | ./i-wzu-auth login -u YourAccount --password-stdin
-
-# 安全方式: 交互式输入密码 (无回显)
+# 登录认证（交互式输入密码，终端下无回显，不留在 shell 历史）
 ./i-wzu-auth login -u YourAccount --password-stdin
 
-# 传统方式 (⚠️ 密码会留在 shell 历史中)
+# 登录认证（传统方式，⚠️ 密码会留在 shell 历史中）
 ./i-wzu-auth login -u <YourAccount> -p <YourPassword>
 
-# 查看当前在线状态 (流量、时长等)
+# 查看当前在线状态
 ./i-wzu-auth status
 
 # 注销当前登录
@@ -60,8 +56,8 @@ echo "YourPassword" | ./i-wzu-auth login -u YourAccount --password-stdin
 | `--url` | `-U` | Srun 认证网关地址 | `http://192.168.16.66` / `SRUN_URL` |
 | `--username` | `-u` | 校园网账号 | 无 / `SRUN_USER` |
 | `--password` | `-p` | 校园网密码 | 无 / `SRUN_PASS` |
-| `--password-stdin` | `-P` | 从标准输入读取密码 (安全) | — |
-| `--save` | `-s` | 登录成功后以**明文**保存配置到本地文件 (权限 0600) | — |
+| `--password-stdin` | `-P` | 交互式输入密码（无回显，不留在 shell 历史） | — |
+| `--save` | `-s` | 登录成功后以**明文**保存配置到本地文件（权限 0600） | — |
 | `--ac-id` | `-a` | 网关节点 ID | `2` (温大通常为 2) |
 | `--force` | `-f` | 强制执行登录，跳过登录前后的联网检测 | `false` |
 | `--dual-stack` | `-d` | 启用双栈认证 (IPv4/IPv6 Dual Stack) | `false` |
@@ -77,61 +73,42 @@ echo "YourPassword" | ./i-wzu-auth login -u YourAccount --password-stdin
 
 ## 🔒 安全使用指南
 
-为避免密码泄露，请优先使用以下安全方式：
-
-### 方式 1：`--password-stdin` (推荐)
+### 方式 1：`--password-stdin`（交互式输入）
 
 ```bash
-# 从文件读取密码 (文件权限建议设为 600)
-./i-wzu-auth login -u 账号 --password-stdin < /etc/i-wzu-auth/pass
-
-# 从管道输入
-echo "密码" | ./i-wzu-auth login -u 账号 --password-stdin
-
-# 交互式输入 (终端下密码不可见)
 ./i-wzu-auth login -u 账号 --password-stdin
 ```
+终端下会弹出 `Password:` 提示，输入时无回显，不留在 shell 历史。
 
-### 方式 2：配置文件 (最便捷)
+### 方式 2：配置文件（自动化场景最便捷）
 
 ```bash
 # 首次登录时保存配置
-echo "密码" | ./i-wzu-auth login -u 账号 --password-stdin --save
+./i-wzu-auth login -u 账号 --password-stdin --save
 
 # 后续直接登录，无需任何凭证
 ./i-wzu-auth login
 ```
 
-配置文件以**明文 JSON** 存储在 `~/.config/i-wzu-auth/config.json`，权限 `600`（仅 owner 可读写）。安全性完全依赖文件权限。
+配置文件以**明文 JSON** 存储在 `~/.config/i-wzu-auth/config.json`，权限 `600`（仅 owner 可读写）。
 
-### 不安全的方式 (⚠️ 仅供临时使用)
+### 不安全的方式
 
-- **`-p` 参数**：密码会留在 shell 历史 (`.bash_history` 等) 中
+- **`-p` 参数**：密码会留在 shell 历史 (`.bash_history` 等)
 - **`SRUN_PASS` 环境变量**：密码可在 `/proc/*/environ` 中被其他用户查看
 
 ---
 
 ## 💡 自动化建议 (Headless)
 
-由于本工具是 CLI 程序，你可以配合 `crontab` 或 `systemd` 实现断网自动重连：
+配合 `crontab` 或 `systemd` 实现断网自动重连：
 
-### 方式 1：使用配置文件
 ```bash
-# 一次性设置 (密码不会留在 shell 历史中)
-echo "你的密码" | ./i-wzu-auth login -u 账号 --password-stdin --save
+# 一次性设置
+./i-wzu-auth login -u 账号 --password-stdin --save
 
 # crontab — 无需任何凭证
 * * * * * /path/to/i-wzu-auth login >> /var/log/srun.log 2>&1
-```
-
-### 方式 2：使用 --password-stdin + 密码文件
-```bash
-# 创建受保护的密码文件
-echo "你的密码" > /etc/i-wzu-auth/pass
-chmod 600 /etc/i-wzu-auth/pass
-
-# crontab
-* * * * * /path/to/i-wzu-auth login -u 账号 --password-stdin < /etc/i-wzu-auth/pass >> /var/log/srun.log 2>&1
 ```
 
 ---
