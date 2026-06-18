@@ -158,9 +158,7 @@ impl SrunClient {
             );
             let chksum = crypto::sha1(&chksum_str);
 
-            let os_name = if cfg!(target_os = "windows") {
-                "Windows 10"
-            } else if cfg!(target_os = "macos") {
+            let os_name = if cfg!(target_os = "macos") {
                 "macOS"
             } else if cfg!(target_os = "android") {
                 "Android"
