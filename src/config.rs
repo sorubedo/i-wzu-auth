@@ -24,9 +24,8 @@ pub fn config_exists() -> bool {
 /// 从配置文件读取用户名和密码
 pub fn load_config() -> Result<(String, String), String> {
     let path = config_path();
-    let content = std::fs::read_to_string(&path).map_err(|e| {
-        format!("无法读取配置文件 {}: {}", path.display(), e)
-    })?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("无法读取配置文件 {}: {}", path.display(), e))?;
 
     let config: StoredConfig =
         serde_json::from_str(&content).map_err(|e| format!("配置文件格式错误: {}", e))?;
@@ -55,8 +54,8 @@ pub fn save_config(username: &str, password: &str) -> Result<(), String> {
         password: password.to_string(),
     };
 
-    let json = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("JSON 序列化失败: {}", e))?;
+    let json =
+        serde_json::to_string_pretty(&config).map_err(|e| format!("JSON 序列化失败: {}", e))?;
 
     std::fs::write(&path, &json)
         .map_err(|e| format!("无法写入配置文件 {}: {}", path.display(), e))?;

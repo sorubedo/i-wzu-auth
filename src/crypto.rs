@@ -1,7 +1,7 @@
-use md5::{Md5, Digest};
-use hmac::{Hmac, Mac};
-use sha1::Sha1;
 use hex;
+use hmac::{Hmac, Mac};
+use md5::{Digest, Md5};
+use sha1::Sha1;
 
 type HmacMd5 = Hmac<Md5>;
 
@@ -100,7 +100,8 @@ pub fn xxtea_encode(data: &str, key: &str) -> Vec<u8> {
     l(&v, false)
 }
 
-const CUSTOM_BASE64_ALPHABET: &[u8] = b"LVoJPiCN2R8G90yg+hmFHuacZ1OWMnrsSTXkYpUq/3dlbfKwv6xztjI7DeBE45QA";
+const CUSTOM_BASE64_ALPHABET: &[u8] =
+    b"LVoJPiCN2R8G90yg+hmFHuacZ1OWMnrsSTXkYpUq/3dlbfKwv6xztjI7DeBE45QA";
 
 pub fn custom_base64_encode(data: &[u8]) -> String {
     let mut res = String::new();
@@ -113,7 +114,7 @@ pub fn custom_base64_encode(data: &[u8]) -> String {
 
         res.push(CUSTOM_BASE64_ALPHABET[(b0 >> 2) as usize] as char);
         res.push(CUSTOM_BASE64_ALPHABET[(((b0 & 3) << 4) | (b1 >> 4)) as usize] as char);
-        
+
         if i + 1 < len {
             res.push(CUSTOM_BASE64_ALPHABET[(((b1 & 0x0f) << 2) | (b2 >> 6)) as usize] as char);
         } else {
