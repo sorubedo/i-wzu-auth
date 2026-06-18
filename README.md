@@ -82,12 +82,11 @@ cargo build --release
 当系统运行 Clash、V2Ray、sing-box 等 TUN 模式代理时，校园网内网地址无法通过代理访问，导致认证失败（`no_response_data_error`）。使用 `--interface` 强制绑定物理网卡：
 
 ```bash
-# 绑定到 eth0 网卡（需 root 或 CAP_NET_RAW）
-sudo i-wzu-auth login -u 账号 -i eth0 --password-stdin
-
-# 或设置 capability 后免 root
-sudo setcap cap_net_raw+ep ./i-wzu-auth
+# 绑定到 eth0 网卡
 ./i-wzu-auth login -u 账号 -i eth0 --password-stdin
+
+# 绑定到 wlan0 无线网卡
+./i-wzu-auth status -i wlan0
 ```
 
 ### 代认证 / 旁路认证

@@ -67,7 +67,6 @@ struct Args {
     dual_stack: bool,
 
     /// 强制绑定到指定网卡发送请求（如 eth0、wlan0），用于绕过 TUN 代理
-    /// 需要 root 权限或 CAP_NET_RAW capability
     #[arg(
         short = 'i',
         long,
