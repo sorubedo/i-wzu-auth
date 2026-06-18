@@ -22,6 +22,7 @@ pub struct SrunClient {
     pub password: String,
     pub ac_id: String,
     pub double_stack: bool,
+    pub custom_ip: Option<String>,
     client: reqwest::blocking::Client,
 }
 
@@ -33,6 +34,7 @@ impl SrunClient {
         ac_id: &str,
         double_stack: bool,
         interface: Option<&str>,
+        ip: Option<&str>,
     ) -> Self {
         let mut builder = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
@@ -50,6 +52,7 @@ impl SrunClient {
             password: password.to_string(),
             ac_id: ac_id.to_string(),
             double_stack,
+            custom_ip: ip.map(|s| s.to_string()),
             client,
         }
     }
@@ -115,6 +118,91 @@ impl SrunClient {
     }
 
     pub fn login(&self) -> Result<AuthResponse, String> {
+        // 自定义 IP 模式：直接使用指定 IP，不自动探测
+        if let Some(ref target_ip) = self.custom_ip {
+            let user_info = self.check_info(target_ip)?;
+            let nas_ip = user_info["nas_ip"].as_str().unwrap_or("");
+
+            let challenge = self.get_challenge(target_ip)?;
+            let token = challenge.challenge;
+            let final_ip = target_ip.clone();
+
+            let hmd5 = crypto::hmac_md5(&token, &self.password);
+
+            let info_str = format!(
+                r#"{{"username":"{}","password":"{}","ip":"{}","acid":"{}","enc_ver":"srun_bx1"}}"#,
+                self.username, self.password, final_ip, self.ac_id
+            );
+            let info_encrypted = crypto::xxtea_encode(&info_str, &token);
+            let info_param = format!("{{SRBX1}}{}", crypto::custom_base64_encode(&info_encrypted));
+
+            let n = "200";
+            let auth_type = "1";
+
+            let chksum_str = format!(
+                "{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
+                token,
+                self.username,
+                token,
+                hmd5,
+                token,
+                self.ac_id,
+                token,
+                final_ip,
+                token,
+                n,
+                token,
+                auth_type,
+                token,
+                info_param
+            );
+            let chksum = crypto::sha1(&chksum_str);
+
+            let os_name = if cfg!(target_os = "windows") {
+                "Windows 10"
+            } else if cfg!(target_os = "macos") {
+                "macOS"
+            } else if cfg!(target_os = "android") {
+                "Android"
+            } else if cfg!(target_os = "ios") {
+                "iOS"
+            } else {
+                "Linux"
+            };
+
+            let double_stack_val = if self.double_stack { "1" } else { "0" };
+
+            let url = format!("{}/cgi-bin/srun_portal", self.base_url);
+            let password_param = format!("{{MD5}}{}", hmd5);
+            let resp = self
+                .client
+                .get(&url)
+                .query(&[
+                    ("action", "login"),
+                    ("username", self.username.as_str()),
+                    ("password", password_param.as_str()),
+                    ("ac_id", self.ac_id.as_str()),
+                    ("ip", final_ip.as_str()),
+                    ("info", info_param.as_str()),
+                    ("chksum", chksum.as_str()),
+                    ("n", n),
+                    ("type", auth_type),
+                    ("os", os_name),
+                    ("name", os_name),
+                    ("double_stack", double_stack_val),
+                    ("nas_ip", nas_ip),
+                    ("callback", "jQuery123"),
+                ])
+                .send()
+                .map_err(|e| e.to_string())?
+                .text()
+                .map_err(|e| e.to_string())?;
+
+            let json = Self::extract_jsonp(&resp)?;
+            return serde_json::from_value(json).map_err(|e| e.to_string());
+        }
+
+        // 默认模式：自动探测本机 IP
         let user_info = self.check_info("")?;
         let ip = user_info["online_ip"]
             .as_str()
@@ -207,7 +295,8 @@ impl SrunClient {
     }
 
     pub fn logout(&self) -> Result<AuthResponse, String> {
-        let user_info = self.check_info("")?;
+        let query_ip = self.custom_ip.as_deref().unwrap_or("");
+        let user_info = self.check_info(query_ip)?;
 
         let ip = user_info["online_ip"]
             .as_str()

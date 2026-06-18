@@ -16,6 +16,8 @@
 - 🔒 **协议支持**：完整实现 Srun 认证所需的 XXTEA、Custom Base64 及 HMAC-MD5 加密。
 - 📊 **状态监测**：一键查看在线时长、已用流量、本机 IP 等详细信息。
 - 📤 **注销下线**：自动识别当前在线账号并执行注销，无需手动输入账号。
+- 🌐 **网卡绑定**：支持强制绑定物理网卡，绕过 TUN 代理（Clash/V2Ray/sing-box）。
+- 🎯 **代认证**：支持为指定 IP 地址发起认证/注销，适配路由器旁路场景。
 - 🌈 **友好交互**：全中文彩色输出，提供明确的错误排查建议。
 
 ---
@@ -62,12 +64,48 @@ cargo build --release
 | `--force` | `-f` | 强制执行登录，跳过登录前后的联网检测 | `false` |
 | `--dual-stack` | `-d` | 启用双栈认证 (IPv4/IPv6 Dual Stack) | `false` |
 | `--check-url` | — | 联网检测 URL (HTTP 204 即为已联网) | `http://connect.rom.miui.com/generate_204` / `SRUN_CHECK_URL` |
+| `--interface` | `-i` | 强制绑定到指定网卡发送请求，绕过 TUN 代理 | 无 / `SRUN_INTERFACE` |
+| `--ip` | — | 为指定 IP 地址发起认证/注销/查询（代认证场景） | 无 / `SRUN_IP` |
 
 ### 子命令 (Subcommands)
 
 - **`login`**: 执行认证流程。程序会先检测网络，若不可达则尝试登录。
 - **`status`**: 查询状态。无需参数，自动识别当前 IP 的流量和时长信息。
 - **`logout`**: 注销下线。无需参数，自动识别当前在线账号并申请注销。
+
+---
+
+## 🔀 特殊场景
+
+### 绕过 TUN 代理
+
+当系统运行 Clash、V2Ray、sing-box 等 TUN 模式代理时，校园网内网地址无法通过代理访问，导致认证失败（`no_response_data_error`）。使用 `--interface` 强制绑定物理网卡：
+
+```bash
+# 绑定到 eth0 网卡（需 root 或 CAP_NET_RAW）
+sudo i-wzu-auth login -u 账号 -i eth0 --password-stdin
+
+# 或设置 capability 后免 root
+sudo setcap cap_net_raw+ep ./i-wzu-auth
+./i-wzu-auth login -u 账号 -i eth0 --password-stdin
+```
+
+### 代认证 / 旁路认证
+
+用一台设备为另一台设备（如同网段下的 PC、手机）发起认证：
+
+```bash
+# 为 192.168.1.100 登录
+./i-wzu-auth login -u 对方账号 --ip 192.168.1.100 --password-stdin
+
+# 注销指定 IP 的设备
+./i-wzu-auth logout --ip 192.168.1.100
+
+# 查询指定 IP 的在线状态
+./i-wzu-auth status --ip 192.168.1.100
+```
+
+指定 `--ip` 后自动跳过联网检测，直接向目标 IP 发送认证请求。
 
 ---
 

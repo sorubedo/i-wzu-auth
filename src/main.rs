@@ -76,6 +76,11 @@ struct Args {
         env = "SRUN_INTERFACE"
     )]
     interface: Option<String>,
+
+    /// 为指定 IP 地址发起认证（用于代认证/旁路认证场景）
+    /// 指定后将跳过联网检测，直接向目标 IP 发送认证请求
+    #[arg(long, global = true, value_name = "IP", env = "SRUN_IP")]
+    ip: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -133,6 +138,7 @@ fn main() {
     let ac_id = args.ac_id;
     let dual_stack = args.dual_stack;
     let interface = args.interface.as_deref();
+    let target_ip = args.ip.as_deref();
 
     match args.command.unwrap_or(Commands::Login) {
         Commands::Login => {
@@ -213,7 +219,15 @@ fn main() {
                 std::process::exit(1);
             };
 
-            if !args.force {
+            if let Some(ip) = target_ip {
+                println!(
+                    "{} {} {} {}",
+                    "🎯".blue(),
+                    "目标 IP:".white(),
+                    ip.cyan().bold(),
+                    "（跳过联网检测）".dimmed()
+                );
+            } else if !args.force {
                 print!("{} {} ", "🔍".blue(), "正在检测网络连通性...".white());
                 if SrunClient::check_online(&check_url, interface) {
                     println!("{}", "已联网 (Online)".green().bold());
@@ -223,7 +237,9 @@ fn main() {
                 println!("{}", "未联网 (Offline)".yellow());
             }
 
-            let client = SrunClient::new(&url, &username, &password, &ac_id, dual_stack, interface);
+            let client = SrunClient::new(
+                &url, &username, &password, &ac_id, dual_stack, interface, target_ip,
+            );
             println!(
                 "{} {} {}",
                 "🔑".blue(),
@@ -318,7 +334,17 @@ fn main() {
                 }
             }
 
-            if !args.force {
+            if target_ip.is_some() {
+                println!(
+                    "{} {}",
+                    "⏩".yellow(),
+                    "已跳过二次联网验证（指定了目标 IP）".dimmed()
+                );
+                println!(
+                    "\n{}\n",
+                    "🎉 认证流程全部完成，祝您用网愉快！".bright_green().bold()
+                );
+            } else if !args.force {
                 print!("{} {} ", "🔬".blue(), "正在进行二次联网验证".white());
                 for i in (1..=3).rev() {
                     print!("{} ", i.to_string().cyan());
@@ -345,10 +371,11 @@ fn main() {
             }
         }
         Commands::Logout => {
-            let client = SrunClient::new(&url, "", "", &ac_id, dual_stack, interface);
+            let client = SrunClient::new(&url, "", "", &ac_id, dual_stack, interface, target_ip);
             println!("{} {}", "📊".blue(), "正在识别当前在线账号...".white());
 
-            match client.check_info("") {
+            let logout_target = target_ip.unwrap_or("");
+            match client.check_info(logout_target) {
                 Ok(info) => {
                     if let Some(online_user) = info["user_name"].as_str() {
                         println!(
@@ -357,8 +384,15 @@ fn main() {
                             "检测到在线用户:".white(),
                             online_user.cyan().bold()
                         );
-                        let logout_client =
-                            SrunClient::new(&url, online_user, "", &ac_id, dual_stack, interface);
+                        let logout_client = SrunClient::new(
+                            &url,
+                            online_user,
+                            "",
+                            &ac_id,
+                            dual_stack,
+                            interface,
+                            target_ip,
+                        );
                         println!("{} {}", "📡".blue(), "正在发起注销请求...".white());
                         match logout_client.logout() {
                             Ok(_) => {
@@ -400,9 +434,19 @@ fn main() {
             }
         }
         Commands::Status => {
-            let client = SrunClient::new(&url, "", "", &ac_id, dual_stack, interface);
+            let client = SrunClient::new(&url, "", "", &ac_id, dual_stack, interface, target_ip);
+            if let Some(ip) = target_ip {
+                println!(
+                    "{} {} {} {}",
+                    "🎯".blue(),
+                    "目标 IP:".white(),
+                    ip.cyan().bold(),
+                    "（查询指定设备）".dimmed()
+                );
+            }
             println!("{} {}", "📊".blue(), "正在获取当前在线状态...".white());
-            match client.check_info("") {
+            let status_target = target_ip.unwrap_or("");
+            match client.check_info(status_target) {
                 Ok(info) => {
                     if info["error"].as_str() == Some("not_online_error") {
                         println!("{} {}", "ℹ️".yellow(), "状态: 当前未在线".yellow().bold());
